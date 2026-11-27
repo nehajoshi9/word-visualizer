@@ -554,7 +554,7 @@ export const SemanticPlane: React.FC<SemanticPlaneProps> = ({
             className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 flex items-center justify-between cursor-pointer transition-colors"
           >
             <span>Delete</span>
-            <span className="text-gray-400 text-[10px] ml-2">"{contextMenu.word}"</span>
+            <span className="text-gray-400 ml-2">"{contextMenu.word}"</span>
           </button>
         </div>
       )}
