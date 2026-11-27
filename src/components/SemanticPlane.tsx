@@ -588,12 +588,6 @@ export const SemanticPlane: React.FC<SemanticPlaneProps> = ({
                 {hoveredLine.cosineDist.toFixed(2)}
               </span>
             </div>
-            <div className="flex justify-between gap-4">
-              <span>Plane distance</span>
-              <span className="text-gray-900">
-                {Math.round(hoveredLine.euclidean2D)} px
-              </span>
-            </div>
           </div>
         </div>
       )}

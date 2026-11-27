@@ -24,7 +24,7 @@ Traditional dictionaries and thesauruses operate on discrete, 1-to-1 lookups—y
 - **Interactive 2D Semantic Plane**: A minimal, responsive canvas where physical distance corresponds to conceptual similarity.
 - **Real-Time PCA Projection**: Computes the top two principal components ($PC_1, PC_2$) of the active word set on the fly, preserving relative distances without coordinate jitter.
 - **Multi-Word Semantic Intersection**: Select any combination of words (e.g., `apple` + `orange`, or `computer` + `brain`) to discover terms that share high semantic affinity with all of them simultaneously.
-- **Pairwise Distance Inspection**: Hover over the connection between any two selected words to view their high-dimensional cosine similarity, vector distance, and projected 2D map distance.
+- **Pairwise Distance Inspection**: Hover over the connection between any two selected words to view their high-dimensional cosine similarity and semantic vector distance.
 - **Zero-Server Architecture**: Runs 100% in the browser via WebAssembly (ONNX Runtime). No external APIs, no backend server, and no cloud database dependencies.
 
 ---
