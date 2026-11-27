@@ -8,10 +8,12 @@ const __dirname = path.dirname(__filename);
 
 const DB_PATH = path.join(__dirname, '../words.db');
 const SYSTEM_DICT = '/usr/share/dict/words';
-const VOCAB_WORDS_PATH = path.join(__dirname, '../public/vocab_words.json');
-const VOCAB_VECTORS_PATH = path.join(__dirname, '../public/vocab_vectors.bin');
+const CORE_WORDS_PATH = path.join(__dirname, '../public/vectors-core-8k.v1.json');
+const CORE_VECTORS_PATH = path.join(__dirname, '../public/vectors-core-8k.v1.bin');
+const EXT_WORDS_PATH = path.join(__dirname, '../public/vectors-ext-32k.v1.json');
+const EXT_VECTORS_PATH = path.join(__dirname, '../public/vectors-ext-32k.v1.bin');
 
-console.log('Initializing words.db with full English dictionary and top 8,000 frequent words...');
+console.log('Initializing words.db with full English dictionary and 40,000 sharded vocabulary...');
 
 // Remove existing DB if any to start fresh
 if (fs.existsSync(DB_PATH)) {
@@ -33,14 +35,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_has_vector ON dictionary (vector);
 `);
 
-// 2. Load top 8,000 frequent words with pre-computed vectors
-const topWords = JSON.parse(fs.readFileSync(VOCAB_WORDS_PATH, 'utf8'));
-const vectorBuffer = fs.readFileSync(VOCAB_VECTORS_PATH);
 const dim = 384;
-const byteStride = dim * 4;
-
-console.log(`Loading ${topWords.length} frequent words with vectors into SQLite...`);
-
 const insertWordWithVector = db.prepare(`
   INSERT INTO dictionary (word, vector, freq_rank, access_count, last_accessed)
   VALUES (?, ?, ?, 1, ?)
@@ -51,15 +46,35 @@ const insertWordWithVector = db.prepare(`
 `);
 
 const now = Date.now();
-db.exec('BEGIN TRANSACTION');
-for (let i = 0; i < topWords.length; i++) {
-  const w = topWords[i].toLowerCase();
-  const subBuf = vectorBuffer.subarray(i * byteStride, (i + 1) * byteStride);
-  insertWordWithVector.run(w, subBuf, i + 1, now);
-}
-db.exec('COMMIT');
 
-console.log(`Top ${topWords.length} frequent words committed to SQLite.`);
+function loadShard(wordsPath, vectorsPath, startRank) {
+  if (!fs.existsSync(wordsPath) || !fs.existsSync(vectorsPath)) {
+    console.warn(`Shard files not found: ${wordsPath}`);
+    return 0;
+  }
+  const words = JSON.parse(fs.readFileSync(wordsPath, 'utf8'));
+  const binBuffer = fs.readFileSync(vectorsPath);
+  const int8 = new Int8Array(binBuffer.buffer, binBuffer.byteOffset, binBuffer.byteLength);
+
+  db.exec('BEGIN TRANSACTION');
+  const f32Buffer = new Float32Array(dim);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i].toLowerCase();
+    const offset = i * dim;
+    for (let d = 0; d < dim; d++) {
+      f32Buffer[d] = int8[offset + d] / 127;
+    }
+    insertWordWithVector.run(w, Buffer.from(f32Buffer.buffer), startRank + i, now);
+  }
+  db.exec('COMMIT');
+  return words.length;
+}
+
+// 2. Load Core 8k and Extended 32k shards if present
+let totalEmbedded = 0;
+totalEmbedded += loadShard(CORE_WORDS_PATH, CORE_VECTORS_PATH, 1);
+totalEmbedded += loadShard(EXT_WORDS_PATH, EXT_VECTORS_PATH, totalEmbedded + 1);
+console.log(`Loaded ${totalEmbedded} sharded words with vectors into SQLite.`);
 
 // 3. Load remaining English words from system dictionary
 if (fs.existsSync(SYSTEM_DICT)) {
@@ -68,29 +83,24 @@ if (fs.existsSync(SYSTEM_DICT)) {
   const allWords = dictContent
     .split('\n')
     .map(w => w.trim().toLowerCase())
-    .filter(w => w.length > 0 && /^[a-z]+$/.test(w));
-
-  const uniqueAllWords = Array.from(new Set(allWords));
-  console.log(`Found ${uniqueAllWords.length} total unique words in system dictionary.`);
+    .filter(w => /^[a-z]{2,20}$/.test(w));
 
   const insertWordOnly = db.prepare(`
-    INSERT OR IGNORE INTO dictionary (word, vector, freq_rank, access_count, last_accessed)
-    VALUES (?, NULL, NULL, 0, NULL)
+    INSERT OR IGNORE INTO dictionary (word, access_count) VALUES (?, 0)
   `);
 
   db.exec('BEGIN TRANSACTION');
-  let inserted = 0;
-  for (const w of uniqueAllWords) {
-    insertWordOnly.run(w);
-    inserted++;
+  let addedCount = 0;
+  for (const word of allWords) {
+    const info = insertWordOnly.run(word);
+    if (info.changes > 0) addedCount++;
   }
   db.exec('COMMIT');
-
-  console.log(`All English words added to SQLite. Total words in dictionary: ${uniqueAllWords.length}.`);
+  console.log(`Added ${addedCount} dictionary words without vectors.`);
 }
 
-// Check counts
-const countRow = db.prepare('SELECT COUNT(*) as total, COUNT(vector) as with_vector FROM dictionary').get();
-console.log(`Database initialized successfully! Total words: ${countRow.total}, with vectors: ${countRow.with_vector}`);
-
-db.close();
+const statsStmt = db.prepare('SELECT COUNT(*) as total, COUNT(vector) as embedded FROM dictionary');
+const stats = statsStmt.get();
+console.log(`\n=== Database Initialization Complete ===`);
+console.log(`Total words: ${stats.total}`);
+console.log(`Words with embeddings: ${stats.embedded}`);

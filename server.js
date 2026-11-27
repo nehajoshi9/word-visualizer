@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const DB_PATH = path.join(__dirname, 'words.db');
 const PORT = process.env.PORT || 3001;
-const LRU_CAPACITY = 30000;
+const LRU_CAPACITY = 40000;
 const DIM = 384;
 
 // 1. Initialize SQLite connection

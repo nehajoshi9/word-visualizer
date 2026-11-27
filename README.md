@@ -53,12 +53,13 @@ This ensures that recommended words are relevant to *all* active selections rath
 
 ## Architecture
 
-Word Visualizer is designed as a standalone static application:
+Word Visualizer uses a **fully automatic, zero-UI 3-layer sharded vocabulary architecture** with `Int8` quantization and `IndexedDB` persistence:
 
-- **Static Binary Vector Space**: A pre-computed 44 MB binary buffer of `Float32Array` embeddings covering 30,000 English words is fetched once and cached by the browser.
-- **In-Memory LRU Index**: Cosine similarity calculations evaluate over all 30,000 words in $< 10\text{ ms}$ using typed arrays in browser RAM.
-- **In-Browser Fallback Embedder**: Any novel or obscure word outside the top 30,000 is embedded dynamically in the client via `@xenova/transformers` running on WebAssembly.
-- **Local Server (Optional)**: Includes an optional Node.js + SQLite backend (`server.js`) indexed with 236,000+ words from the full dictionary for local experimentation.
+- **Layer 1 — Core 8k Shard (`vectors-core-8k.v1.*`)**: Top 8,000 most frequent English words quantized to signed `Int8` (~3.07 MB binary buffer). Fetched immediately on boot so the 2D plane and semantic search are interactive right away.
+- **Layer 2 — Silent Idle 32k Upgrade (`vectors-ext-32k.v1.*`)**: Words ranked 8,001 to 40,000 quantized to signed `Int8` (~12.29 MB binary buffer). Fetched in the background via `requestIdleCallback` and saved to `IndexedDB` (`word-visualizer-shards`). Subsequent visits load all 40,000 words in ~40 ms with zero network calls.
+- **Layer 3 — In-Browser WASM Fallback**: Any novel, rare, or domain-specific word outside the 40,000 pre-computed vocabulary is embedded on the fly in the browser via `@xenova/transformers` (WebAssembly) and dynamically added to the active candidate pool.
+- **Sub-10ms Cosine Similarity Scans**: Direct dot products over contiguous `Int8Array` buffers evaluate 40,000 words in $< 10\text{ ms}$ in browser RAM.
+- **Local Server (Optional)**: Includes an optional Node.js + SQLite backend (`server.js`) indexed with 240,000+ words from the full dictionary for local experimentation.
 
 ---
 
@@ -100,7 +101,7 @@ The output in `dist/` is ready to deploy to any static hosting provider (GitHub 
 - **Frontend**: React 19, TypeScript, Tailwind CSS, Vite
 - **Machine Learning**: `@xenova/transformers` (ONNX Runtime WebAssembly), Sentence Transformers
 - **Math & Algorithms**: Custom Dual Gram Matrix PCA with Rayleigh quotient iteration
-- **Storage / Indexing**: Native Float32Array binary buffers, in-memory LRU cache, optional `node:sqlite`
+- **Storage / Indexing**: Sharded `Int8Array` binary buffers, IndexedDB caching, unified $O(1)$ index, optional `node:sqlite`
 
 ---
 
