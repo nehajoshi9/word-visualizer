@@ -5,35 +5,82 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const TARGET_COUNT = 30000;
+const SYSTEM_DICT = '/usr/share/dict/words';
+
 async function run() {
   const { pipeline, AutoTokenizer, env } = await import('@xenova/transformers');
   env.allowRemoteModels = false;
 
-  console.log('Loading tokenizer & pipeline from local cache...');
+  console.log('Loading tokenizer from local cache...');
   const tokenizer = await AutoTokenizer.from_pretrained('Xenova/all-MiniLM-L6-v2');
   const tokens = Object.values(tokenizer.model.vocab);
 
-  // Filter for clean alphabetic English words of reasonable length
-  // Exclude subwords (##) and non-alphabetic tokens
-  const rawWords = tokens.filter(
-    t => typeof t === 'string' && !t.startsWith('##') && /^[a-z]{2,16}$/.test(t)
+  // 1. Gather all whole alphabetic English words from MiniLM tokenizer (~21,700 words)
+  // MiniLM tokens are naturally ordered by corpus frequency in Wikipedia/BookCorpus
+  const minilmWords = tokens.filter(
+    t => typeof t === 'string' && !t.startsWith('##') && /^[a-z]+$/.test(t)
   );
 
-  // Deduplicate and filter out trivial 2-letter tokens except common ones
-  const allowedTwoLetter = new Set(['in', 'on', 'at', 'by', 'to', 'up', 'so', 'no', 'go', 'we', 'he', 'me', 'my', 'do', 'it', 'is', 'as', 'if', 'or']);
-  const cleanWords = rawWords.filter(w => w.length > 2 || allowedTwoLetter.has(w));
+  const wordSet = new Set(minilmWords);
+  console.log(`Gathered ${wordSet.size} whole words from MiniLM tokenizer.`);
 
-  // Take top 8,000 most frequent English words covering all general usage
-  const targetWords = cleanWords.slice(0, 8000);
-  console.log(`Selected ${targetWords.length} general English vocabulary words.`);
+  // 2. Supplement from system dictionary to reach 30,000 words
+  if (wordSet.size < TARGET_COUNT && fs.existsSync(SYSTEM_DICT)) {
+    const dictContent = fs.readFileSync(SYSTEM_DICT, 'utf8');
+    const lines = dictContent.split('\n').map(l => l.trim());
+    const commonDictWords = lines.filter(
+      w => /^[a-z]{3,14}$/.test(w) && !wordSet.has(w)
+    );
 
-  const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+    // Group candidates by first letter for balanced A-Z coverage
+    const byLetter = {};
+    for (let c = 97; c <= 122; c++) byLetter[String.fromCharCode(c)] = [];
+    for (const w of commonDictWords) {
+      if (byLetter[w[0]]) byLetter[w[0]].push(w);
+    }
+
+    const needed = TARGET_COUNT - wordSet.size;
+    const extraWords = [];
+    let idx = 0;
+
+    while (extraWords.length < needed) {
+      let anyAdded = false;
+      for (let c = 97; c <= 122; c++) {
+        const letter = String.fromCharCode(c);
+        const list = byLetter[letter];
+        if (idx < list.length) {
+          extraWords.push(list[idx]);
+          anyAdded = true;
+          if (extraWords.length >= needed) break;
+        }
+      }
+      if (!anyAdded) break;
+      idx++;
+    }
+
+    for (const w of extraWords) {
+      wordSet.add(w);
+    }
+  }
+
+  const targetWords = Array.from(wordSet).slice(0, TARGET_COUNT);
+  console.log(`Target vocabulary prepared: ${targetWords.length} words.`);
+
+  // 3. Embed all 30,000 words using all-MiniLM-L6-v2
+  console.log('Loading embedding pipeline (all-MiniLM-L6-v2)...');
+  const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+    quantized: true,
+  });
+
   const dim = 384;
   const total = targetWords.length;
   const floatBuffer = new Float32Array(total * dim);
 
   const BATCH_SIZE = 128;
   const t0 = Date.now();
+
+  console.log(`Beginning batch embedding (${total} words in batches of ${BATCH_SIZE})...`);
 
   for (let i = 0; i < total; i += BATCH_SIZE) {
     const batch = targetWords.slice(i, i + BATCH_SIZE);
@@ -47,9 +94,11 @@ async function run() {
       }
     }
 
-    if ((i + BATCH_SIZE) % 1024 === 0 || i + BATCH_SIZE >= total) {
+    if ((i + BATCH_SIZE) % 2048 === 0 || i + BATCH_SIZE >= total) {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`Embedded ${Math.min(i + BATCH_SIZE, total)} / ${total} words (${elapsed}s)...`);
+      const done = Math.min(i + BATCH_SIZE, total);
+      const percent = Math.round((done / total) * 100);
+      console.log(`Embedded ${done} / ${total} words (${percent}%) in ${elapsed}s...`);
     }
   }
 
@@ -58,12 +107,16 @@ async function run() {
     fs.mkdirSync(publicDir, { recursive: true });
   }
 
+  // 4. Save word list and raw binary vector buffer
   fs.writeFileSync(path.join(publicDir, 'vocab_words.json'), JSON.stringify(targetWords));
   fs.writeFileSync(path.join(publicDir, 'vocab_vectors.bin'), Buffer.from(floatBuffer.buffer));
 
-  console.log('Finished successfully:');
-  console.log(`- public/vocab_words.json: ${targetWords.length} words`);
-  console.log(`- public/vocab_vectors.bin: ${(floatBuffer.byteLength / (1024 * 1024)).toFixed(2)} MB`);
+  const totalTime = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log('\n=== Generation Complete ===');
+  console.log(`- Words: ${targetWords.length}`);
+  console.log(`- Time: ${totalTime}s`);
+  console.log(`- Output words file: public/vocab_words.json (${(fs.statSync(path.join(publicDir, 'vocab_words.json')).size / 1024).toFixed(1)} KB)`);
+  console.log(`- Output vector file: public/vocab_vectors.bin (${(floatBuffer.byteLength / (1024 * 1024)).toFixed(2)} MB)`);
 }
 
 run().catch(err => {

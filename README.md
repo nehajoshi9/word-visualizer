@@ -55,9 +55,9 @@ This ensures that recommended words are relevant to *all* active selections rath
 
 Word Visualizer is designed as a standalone static application:
 
-- **Static Binary Vector Space**: A pre-computed 11 MB binary buffer of `Float32Array` embeddings covering the 8,000 most frequent English words is fetched once and cached by the browser.
-- **In-Memory LRU Index**: Cosine similarity calculations evaluate over all 8,000 words in $< 2\text{ ms}$ using typed arrays in browser RAM.
-- **In-Browser Fallback Embedder**: Any novel or obscure word outside the top 8,000 is embedded dynamically in the client via `@xenova/transformers` running on WebAssembly.
+- **Static Binary Vector Space**: A pre-computed 44 MB binary buffer of `Float32Array` embeddings covering 30,000 English words is fetched once and cached by the browser.
+- **In-Memory LRU Index**: Cosine similarity calculations evaluate over all 30,000 words in $< 10\text{ ms}$ using typed arrays in browser RAM.
+- **In-Browser Fallback Embedder**: Any novel or obscure word outside the top 30,000 is embedded dynamically in the client via `@xenova/transformers` running on WebAssembly.
 - **Local Server (Optional)**: Includes an optional Node.js + SQLite backend (`server.js`) indexed with 236,000+ words from the full dictionary for local experimentation.
 
 ---

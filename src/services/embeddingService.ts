@@ -19,7 +19,7 @@ export interface SimilarityResult {
   isAlreadyOnCanvas: boolean;
 }
 
-const LRU_CAPACITY = 8000;
+const LRU_CAPACITY = 30000;
 const DIM = 384;
 
 class LRUCache {
@@ -156,7 +156,7 @@ class EmbeddingService {
     return {
       lruCacheSize: this.clientLRUCache.size(),
       lruCapacity: LRU_CAPACITY,
-      dbTotalWords: this.vocabWords.length || 8000,
+      dbTotalWords: this.vocabWords.length || 30000,
       dbEmbeddedWords: this.clientLRUCache.size(),
       mode: 'browser',
     };
